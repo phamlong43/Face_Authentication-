@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 # Load model
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-interpreter = tf.lite.Interpreter(model_path=r"D:\PhamLong\code\Project\face_authentication\facenet.tflite")
+interpreter = tf.lite.Interpreter(model_path="facenet.tflite")
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
