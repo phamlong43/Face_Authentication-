@@ -29,7 +29,7 @@ def extract_embedding(face_img):
     emb = interpreter.get_tensor(output_details[0]['index'])[0]
     return emb / np.linalg.norm(emb)
 
-def compare_embeddings(emb1, emb2, threshold=0.4):  
+def compare_embeddings(emb1, emb2, threshold=0.2):  
     return cosine(emb1, emb2) < threshold
 
 def save_db():
