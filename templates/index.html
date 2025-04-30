@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ thống Nhận diện Khuôn mặt</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #video-container {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+        }
+        .form-group {
+            margin: 20px 0;
+        }
+        input, button {
+            padding: 8px 15px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #message {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        #users-list {
+            margin-top: 20px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <h1>Hệ thống Nhận diện Khuôn mặt</h1>
+    
+    <div id="video-container">
+        <img id="videoElement" src="{{ url_for('video_feed') }}" alt="Camera Feed">
+    </div>
+    
+    <div class="form-group">
+        <input type="text" id="nameInput" placeholder="Nhập tên người dùng">
+        <button id="registerBtn">Đăng ký khuôn mặt</button>
+    </div>
+    
+    <div id="message"></div>
+    
+    <div id="users-container">
+        <h2>Danh sách người dùng đã đăng ký</h2>
+        <div id="users-list"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const registerBtn = document.getElementById('registerBtn');
+            const nameInput = document.getElementById('nameInput');
+            const messageDiv = document.getElementById('message');
+            const usersList = document.getElementById('users-list');
+            
+            // Tải danh sách người dùng
+            function loadUsers() {
+                fetch('/users')
+                    .then(response => response.json())
+                    .then(data => {
+                        usersList.innerHTML = '';
+                        if (data.users.length === 0) {
+                            usersList.innerHTML = '<p>Chưa có người dùng nào được đăng ký</p>';
+                        } else {
+                            const ul = document.createElement('ul');
+                            data.users.forEach(user => {
+                                const li = document.createElement('li');
+                                li.textContent = user;
+                                ul.appendChild(li);
+                            });
+                            usersList.appendChild(ul);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading users:', error);
+                    });
+            }
+            
+            // Xử lý đăng ký
+            registerBtn.addEventListener('click', function() {
+                const name = nameInput.value.trim();
+                
+                if (!name) {
+                    showMessage('Vui lòng nhập tên người dùng', false);
+                    return;
+                }
+                
+                fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name: name }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    showMessage(data.message, data.success);
+                    if (data.success) {
+                        setTimeout(() => {
+                            loadUsers();
+                        }, 2000); // Cho phép thời gian để đăng ký hoàn tất
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showMessage('Đã xảy ra lỗi khi đăng ký', false);
+                });
+            });
+            
+            function showMessage(text, isSuccess) {
+                messageDiv.textContent = text;
+                messageDiv.style.display = 'block';
+                
+                if (isSuccess) {
+                    messageDiv.className = 'success';
+                } else {
+                    messageDiv.className = 'error';
+                }
+                
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 5000);
+            }
+            
+            // Tải danh sách người dùng khi trang web được tải
+            loadUsers();
+        });
+    </script>
+</body>
+</html>

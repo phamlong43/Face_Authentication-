@@ -1,59 +1,97 @@
+# -*- coding: utf-8 -*-
+import dlib
 import cv2
 import numpy as np
-import tensorflow.lite as tflite
-from scipy.spatial.distance import cosine
 import os
-import threading
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+# Tai model phat hien khuon mat va dac trung khuon mat
+detector = dlib.get_frontal_face_detector()
+sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
+face_encoder = dlib.face_recognition_model_v1("dlib_face_recognition_resnet_model_v1.dat")
 
-interpreter = tflite.Interpreter(model_path="facenet.tflite")
-interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
-
+# File luu co so du lieu khuon mat
 DB_FILE = "face_db.npz"
 embeddings = []
 labels = []
 
 if os.path.exists(DB_FILE):
     data = np.load(DB_FILE, allow_pickle=True)
-    embeddings = list(data["embedding"])
-    labels = list(data["label"])
+    embeddings = list(data["embeddings"])
+    labels = list(data["labels"])
 
-def extract_embedding(face_img):
-    img = cv2.resize(face_img, (160, 160)).astype(np.float32) / 255.0
-    img = np.expand_dims(img, axis=0)
-    interpreter.set_tensor(input_details[0]['index'], img)
-    interpreter.invoke()
-    emb = interpreter.get_tensor(output_details[0]['index'])[0]
-    return emb / np.linalg.norm(emb)
+# Lay embedding tu anh
+def get_face_embedding(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    faces = detector(gray)
+    embs = []
+    for face in faces:
+        landmarks = sp(gray, face)
+        embedding = face_encoder.compute_face_descriptor(image, landmarks)
+        embs.append(np.array(embedding))
+    return embs
 
-def compare_embeddings(emb1, emb2, threshold=0.2):  
-    return cosine(emb1, emb2) < threshold
+# So sanh 2 embedding
+def compare_embeddings(embedding1, embedding2):
+    dist = np.linalg.norm(embedding1 - embedding2)
+    return dist, dist < 0.6
 
+# Luu csdl
 def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
-def handle_register(face_img):
-    new_emb = extract_embedding(face_img)
+# Dang ky khuon mat
+def register_face(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = detector(gray)
 
-    for emb in embeddings:
-        if compare_embeddings(emb, new_emb):
-            print("[!] Khuon mat da ton tai!")
+    if len(faces) == 0:
+        return
+
+    face = faces[0]
+    landmarks = sp(gray, face)
+    embedding = face_encoder.compute_face_descriptor(frame, landmarks)
+    embedding = np.array(embedding)
+
+    for reg_emb in embeddings:
+        _, matched = compare_embeddings(reg_emb, embedding)
+        if matched:
             return
 
     name = input("Nhap ten nguoi dung: ").strip()
-
     if name in labels:
-        print(f"[!] Ten '{name}' da ton tai!")
         return
 
-    embeddings.append(new_emb)
+    embeddings.append(embedding)
     labels.append(name)
     save_db()
-    print(f"[+] Dang ky thanh cong cho {name}")
 
+# Xac thuc khuon mat va hien thi ket qua tren khung hinh
+def verify_faces_on_frame(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = detector(gray)
+
+    for face in faces:
+        landmarks = sp(gray, face)
+        embedding = face_encoder.compute_face_descriptor(frame, landmarks)
+        embedding = np.array(embedding)
+
+        matched_name = "Unknown"
+        max_score = 0.0
+
+        for name, reg_emb in zip(labels, embeddings):
+            dist, matched = compare_embeddings(reg_emb, embedding)
+            score = max(0, 1 - dist) * 100
+            if matched and score > max_score:
+                matched_name = name
+                max_score = score
+
+        # Ve bounding box va ten
+        cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
+        text = f"{matched_name} ({max_score:.2f}%)"
+        cv2.putText(frame, text, (face.left(), face.top() - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+# Main
 def main():
     cap = cv2.VideoCapture(0)
     mode = "idle"
@@ -63,41 +101,20 @@ def main():
         if not ret:
             break
 
-        small_frame = cv2.resize(frame, (320, 240))
-        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        # Xu ly theo mode
+        if mode == "register":
+            register_face(frame)
+            mode = "idle"
+        else:
+            verify_faces_on_frame(frame)
 
-        for (x, y, w, h) in faces:
-            if w < 60 or h < 60:
-                continue
-
-            face = small_frame[y:y+h, x:x+w]
-            cv2.rectangle(small_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-
-            if mode == "verify":
-                emb_live = extract_embedding(face)
-                found = False
-                for name, emb_reg in zip(labels, embeddings):
-                    if compare_embeddings(emb_live, emb_reg):
-                        cv2.putText(small_frame, f"? {name}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
-                        found = True
-                        break
-                if not found:
-                    cv2.putText(small_frame, "? Unknown", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
-
-            elif mode == "register":
-                threading.Thread(target=handle_register, args=(face.copy(),)).start()
-                mode = "idle"
-
-        cv2.putText(small_frame, "'r': Dang ky | 'v': Xac thuc | 'q': Thoat", (10, 20),
+        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.imshow("Face Verification", small_frame)
+        cv2.imshow("Face Recognition", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('r'):
             mode = "register"
-        elif key == ord('v'):
-            mode = "verify"
         elif key == ord('q'):
             break
 
