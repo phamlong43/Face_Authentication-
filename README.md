@@ -1,11 +1,34 @@
 # Dự Án Xác Thực Khuôn Mặt (Face Authentication)
 
 ## Mô Tả
-Dự án xác thực khuôn mặt sử dụng các thuật toán nhận dạng khuôn mặt để xác thực người dùng. Dự án này giúp nhận diện và xác thực người dùng thông qua việc sử dụng AIAI so sánh khuôn mặt từ camera với dữ liệu mẫu đã được lưu trữ trước đó.
+Dự án xác thực khuôn mặt sử dụng các thuật toán nhận dạng khuôn mặt để xác thực người dùng. Dự án này giúp nhận diện và xác thực người dùng thông qua việc sử dụng AI so sánh khuôn mặt từ camera với dữ liệu mẫu đã được lưu trữ trước đó.
 
-## Các Bước Cài Đặt
+## Các bước cài đặt
 
-### Bước 1: Cài Đặt Python
+## Cài đặt và chạy real time với Linux 
+### Bước 1: Tạo và kích hoạt môi trường ảo (Tùy chọn)
+```bash
+python -m venv venv
+```
+#### Kích hoạt môi trường ảo:
+```bash
+source venv/bin/activate
+```
+### Bước 2: Cài đặt thư viện ttừ File requirements_Pi.txt
+```bash
+pip install -r requirements_Linux.txt
+```
+### Bước 3: Chạy chế độ Realtime với chế độ Webcam:
+```bash
+python face_authentication_Linux.py
+```
+
+## *Cài đặt và chạy real time với Window 
+```bash
+ (Đang cập nhật)
+```
+
+<!-- ### Bước 1: Cài Đặt Python
 
 Đảm bảo bạn đã cài đặt Python 3.9 - 3.12 (Recommended: 3.11.1). Bạn có thể tải Python tại đây: [Python Downloads](https://www.python.org/downloads/).
 
@@ -37,7 +60,7 @@ python face_authentication_gradio.py
 #### Để chạy chế độ realtime với chế độ webcam realtime:
 ```bash
 python face_authentication_Flask.py
-```
+``` -->
 
 
 ## Cài đặt và chạy real time với Pi4: 
