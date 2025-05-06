@@ -31,7 +31,7 @@ def register_face(image, name):
     faces = detector(gray)
 
     if len(faces) == 0:
-        print("⚠ Không phát hiện khuôn mặt.")
+        print("â  KhĂ´ng phĂ¡t hiá»‡n khuĂ´n máº·t.")
         return
 
     face = faces[0]
@@ -42,13 +42,13 @@ def register_face(image, name):
     for reg_emb in embeddings:
         _, matched = compare_embeddings(reg_emb, embedding)
         if matched:
-            print("⚠ Khuôn mặt đã tồn tại.")
+            print("â  KhuĂ´n máº·t Ä‘Ă£ tá»“n táº¡i.")
             return
 
     embeddings.append(embedding)
     labels.append(name)
     save_db()
-    print(f"✅ Đăng ký thành công: {name}")
+    print(f"âœ… ÄÄƒng kĂ½ thĂ nh cĂ´ng: {name}")
 
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -74,10 +74,10 @@ def verify_faces_on_frame(frame):
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Luồng nhập tên từ terminal
+# Luá»“ng nháº­p tĂªn tá»« terminal
 def input_thread(input_queue):
     while True:
-        name = input("Nhập tên để đăng ký (hoặc để trống để hủy): ").strip()
+        name = input("Nháº­p tĂªn Ä‘á»ƒ Ä‘Äƒng kĂ½ (hoáº·c Ä‘á»ƒ trá»‘ng Ä‘á»ƒ há»§y): ").strip()
         input_queue.put(name)
 
 def main():
@@ -85,7 +85,7 @@ def main():
     input_queue = queue.Queue()
     last_frame = None
 
-    # Bắt đầu thread để nhập tên
+    # Báº¯t Ä‘áº§u thread Ä‘á»ƒ nháº­p tĂªn
     threading.Thread(target=input_thread, args=(input_queue,), daemon=True).start()
 
     while True:
@@ -96,22 +96,22 @@ def main():
         last_frame = frame.copy()
         verify_faces_on_frame(frame)
 
-        cv2.putText(frame, "'r': Đăng ký | 'q': Thoát", (10, 20),
+        cv2.putText(frame, "'r': ÄÄƒng kĂ½ | 'q': ThoĂ¡t", (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         cv2.imshow("Face Recognition", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('r'):
-            print("📸 Đang chụp khuôn mặt...")
-            print("💬 Nhập tên ở terminal:")
-            # Chờ tên nhập từ thread
+            print("đŸ“¸ Äang chá»¥p khuĂ´n máº·t...")
+            print("đŸ’¬ Nháº­p tĂªn á»Ÿ terminal:")
+            # Chá» tĂªn nháº­p tá»« thread
             while input_queue.empty():
                 cv2.waitKey(1)
             name = input_queue.get()
             if name:
                 register_face(last_frame, name)
             else:
-                print("❌ Đăng ký bị hủy.")
+                print("âŒ ÄÄƒng kĂ½ bá»‹ há»§y.")
         elif key == ord('q'):
             break
 
