@@ -74,51 +74,31 @@ def verify_faces_on_frame(frame):
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Tạo các biến trạng thái đăng ký
+# Đăng ký bằng thread
 is_registering = False
-input_name = ""
-register_thread_running = False
-
-def handle_key_input(key):
-    global input_name, is_registering, register_thread_running
-
-    if key == 13:  # Enter
-        if input_name and not register_thread_running:
-            print(f"🔧 Đăng ký: {input_name}")
-            register_thread_running = True
-            threading.Thread(target=register_worker, args=(last_frame.copy(), input_name), daemon=True).start()
-            is_registering = False
-            input_name = ""
-    elif key == 8:  # Backspace
-        input_name = input_name[:-1]
-    elif 32 <= key <= 126:  # ASCII printable
-        input_name += chr(key)
+register_name = ""
+register_lock = threading.Lock()
 
 def register_worker(frame, name):
-    global register_thread_running
-    register_face(frame, name)
-    register_thread_running = False
+    with register_lock:
+        register_face(frame, name)
 
-# Main
-last_frame = None
 def main():
-    global is_registering, input_name, last_frame
-
+    global is_registering, register_name
     cap = cv2.VideoCapture(0)
-    print("Nhấn 'r' để đăng ký, 'q' để thoát.")
+
+    print("Nhấn 'r' để đăng ký | 'q' để thoát.")
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        last_frame = frame.copy()
 
         verify_faces_on_frame(frame)
 
-        # Giao diện nhập tên
         if is_registering:
-            cv2.putText(frame, "Nhap ten: " + input_name, (10, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            cv2.putText(frame, f"Dang ky: {register_name}", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         else:
             cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
@@ -126,14 +106,14 @@ def main():
         cv2.imshow("Face Recognition", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if is_registering:
-            handle_key_input(key)
-        else:
-            if key == ord('r'):
-                is_registering = True
-                input_name = ""
-            elif key == ord('q'):
-                break
+        if key == ord('r') and not is_registering and not register_lock.locked():
+            is_registering = True
+            register_name = "user_" + str(len(labels) + 1)
+            frame_copy = frame.copy()
+            threading.Thread(target=register_worker, args=(frame_copy, register_name), daemon=True).start()
+            is_registering = False
+        elif key == ord('q'):
+            break
 
     cap.release()
     cv2.destroyAllWindows()
