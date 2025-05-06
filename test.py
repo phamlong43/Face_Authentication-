@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import os
 import threading
-import time
 
 # Load model
 detector = dlib.get_frontal_face_detector()
@@ -31,7 +30,7 @@ def register_face(image, name):
     faces = detector(gray)
 
     if len(faces) == 0:
-        print("? Không phát hi?n khuôn m?t.")
+        print("⚠ Không phát hiện khuôn mặt.")
         return
 
     face = faces[0]
@@ -42,13 +41,13 @@ def register_face(image, name):
     for reg_emb in embeddings:
         _, matched = compare_embeddings(reg_emb, embedding)
         if matched:
-            print("? Khuôn m?t đ? t?n t?i.")
+            print("⚠ Khuôn mặt đã tồn tại.")
             return
 
     embeddings.append(embedding)
     labels.append(name)
     save_db()
-    print(f"? Đăng k? thành công: {name}")
+    print(f"✅ Đăng ký thành công: {name}")
 
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -75,47 +74,70 @@ def verify_faces_on_frame(frame):
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Bi?n toàn c?c đ? theo d?i tr?ng thái đăng k?
-register_requested = False
-register_name = ""
-register_lock = threading.Lock()
+# Tạo các biến trạng thái đăng ký
+is_registering = False
+input_name = ""
+register_thread_running = False
 
-# Lu?ng đăng k? không ch?n lu?ng chính
+def handle_key_input(key):
+    global input_name, is_registering, register_thread_running
+
+    if key == 13:  # Enter
+        if input_name and not register_thread_running:
+            print(f"🔧 Đăng ký: {input_name}")
+            register_thread_running = True
+            threading.Thread(target=register_worker, args=(last_frame.copy(), input_name), daemon=True).start()
+            is_registering = False
+            input_name = ""
+    elif key == 8:  # Backspace
+        input_name = input_name[:-1]
+    elif 32 <= key <= 126:  # ASCII printable
+        input_name += chr(key)
+
 def register_worker(frame, name):
-    with register_lock:
-        register_face(frame.copy(), name)
+    global register_thread_running
+    register_face(frame, name)
+    register_thread_running = False
 
+# Main
+last_frame = None
 def main():
-    global register_requested, register_name
+    global is_registering, input_name, last_frame
+
     cap = cv2.VideoCapture(0)
-    print("Nh?n 'r' đ? đăng k?, 'q' đ? thoát.")
+    print("Nhấn 'r' để đăng ký, 'q' để thoát.")
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
+        last_frame = frame.copy()
 
-        # Xác th?c liên t?c
         verify_faces_on_frame(frame)
 
-        # Giao di?n hi?n th?
-        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Giao diện nhập tên
+        if is_registering:
+            cv2.putText(frame, "Nhap ten: " + input_name, (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        else:
+            cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
         cv2.imshow("Face Recognition", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('r') and not register_lock.locked():
-            print("?? Đang ch? nh?p tên ngư?i dùng (trên terminal)...")
-            register_name = input("Nh?p tên ngư?i dùng đ? đăng k?: ").strip()
-            if register_name and register_name not in labels:
-                threading.Thread(target=register_worker, args=(frame.copy(), register_name), daemon=True).start()
-            else:
-                print("? Tên đ? t?n t?i ho?c không h?p l?.")
-        elif key == ord('q'):
-            break
+        if is_registering:
+            handle_key_input(key)
+        else:
+            if key == ord('r'):
+                is_registering = True
+                input_name = ""
+            elif key == ord('q'):
+                break
 
     cap.release()
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
+
