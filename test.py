@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import os
 import threading
-import queue
 
 # Load model
 detector = dlib.get_frontal_face_detector()
@@ -11,7 +10,8 @@ sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
 face_encoder = dlib.face_recognition_model_v1("dlib_face_recognition_resnet_model_v1.dat")
 
 DB_FILE = "face_db.npz"
-embeddings, labels = [], []
+embeddings = []
+labels = []
 
 if os.path.exists(DB_FILE):
     data = np.load(DB_FILE, allow_pickle=True)
@@ -25,13 +25,12 @@ def compare_embeddings(embedding1, embedding2):
 def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
-# Hàm xử lý đăng ký gắn với ảnh & tên
 def register_face(image, name):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
 
     if len(faces) == 0:
-        print("⚠ Không phát hiện khuôn mặt.")
+        print("[!] Khong phat hien khuon mat.")
         return
 
     face = faces[0]
@@ -42,15 +41,14 @@ def register_face(image, name):
     for reg_emb in embeddings:
         _, matched = compare_embeddings(reg_emb, embedding)
         if matched:
-            print("⚠ Khuôn mặt đã tồn tại.")
+            print("[!] Khuon mat da ton tai.")
             return
 
     embeddings.append(embedding)
     labels.append(name)
     save_db()
-    print(f"✅ Đăng ký thành công: {name}")
+    print(f"[+] Dang ky thanh cong: {name}")
 
-# Nhận diện khuôn mặt và gán nhãn
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -75,48 +73,30 @@ def verify_faces_on_frame(frame):
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Luồng nhập tên từ terminal
-def input_thread(input_queue):
-    while True:
-        name = input("Nhập tên để đăng ký (để trống để hủy): ").strip()
-        input_queue.put(name)
-
 def main():
     cap = cv2.VideoCapture(0)
-    input_queue = queue.Queue()
-    frame_to_register = [None]  # Dùng list để giữ tham chiếu trong thread
-
-    threading.Thread(target=input_thread, args=(input_queue,), daemon=True).start()
+    last_frame = None
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        small_frame = cv2.resize(frame, (640, 480))
-        verify_faces_on_frame(small_frame)
+        last_frame = frame.copy()
+        verify_faces_on_frame(frame)
 
-        cv2.putText(small_frame, "'r': Đăng ký | 'q': Thoát", (10, 20),
+        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.imshow("Face Recognition", small_frame)
+        cv2.imshow("Nhan dien khuon mat", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('r'):
-            frame_to_register[0] = frame.copy()
-            print("📸 Đã chụp ảnh khuôn mặt. Nhập tên trong terminal...")
-
-            # Tạo thread để xử lý đăng ký
-            def async_register():
-                while input_queue.empty():
-                    cv2.waitKey(1)
-                name = input_queue.get()
-                if name:
-                    register_face(frame_to_register[0], name)
-                else:
-                    print("❌ Đăng ký bị hủy.")
-
-            threading.Thread(target=async_register, daemon=True).start()
-
+            print("[*] Dang ky: nhap ten tren terminal...")
+            name = input("Nhap ten: ").strip()
+            if name:
+                threading.Thread(target=register_face, args=(last_frame.copy(), name)).start()
+            else:
+                print("[-] Dang ky bi huy.")
         elif key == ord('q'):
             break
 
