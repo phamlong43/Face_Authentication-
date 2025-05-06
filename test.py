@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import os
 import threading
+import queue
 
 # Load model
 detector = dlib.get_frontal_face_detector()
@@ -68,50 +69,49 @@ def verify_faces_on_frame(frame):
                 matched_name = name
                 max_score = score
 
-        # Draw box and name
         cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
         text = f"{matched_name} ({max_score:.2f}%)"
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Đăng ký bằng thread
-is_registering = False
-register_name = ""
-register_lock = threading.Lock()
-
-def register_worker(frame, name):
-    with register_lock:
-        register_face(frame, name)
+# Luồng nhập tên từ terminal
+def input_thread(input_queue):
+    while True:
+        name = input("Nhập tên để đăng ký (hoặc để trống để hủy): ").strip()
+        input_queue.put(name)
 
 def main():
-    global is_registering, register_name
     cap = cv2.VideoCapture(0)
+    input_queue = queue.Queue()
+    last_frame = None
 
-    print("Nhấn 'r' để đăng ký | 'q' để thoát.")
+    # Bắt đầu thread để nhập tên
+    threading.Thread(target=input_thread, args=(input_queue,), daemon=True).start()
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
+        last_frame = frame.copy()
         verify_faces_on_frame(frame)
 
-        if is_registering:
-            cv2.putText(frame, f"Dang ky: {register_name}", (10, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        else:
-            cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-
+        cv2.putText(frame, "'r': Đăng ký | 'q': Thoát", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         cv2.imshow("Face Recognition", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('r') and not is_registering and not register_lock.locked():
-            is_registering = True
-            register_name = "user_" + str(len(labels) + 1)
-            frame_copy = frame.copy()
-            threading.Thread(target=register_worker, args=(frame_copy, register_name), daemon=True).start()
-            is_registering = False
+        if key == ord('r'):
+            print("📸 Đang chụp khuôn mặt...")
+            print("💬 Nhập tên ở terminal:")
+            # Chờ tên nhập từ thread
+            while input_queue.empty():
+                cv2.waitKey(1)
+            name = input_queue.get()
+            if name:
+                register_face(last_frame, name)
+            else:
+                print("❌ Đăng ký bị hủy.")
         elif key == ord('q'):
             break
 
