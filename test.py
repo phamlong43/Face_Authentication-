@@ -19,7 +19,7 @@ if os.path.exists(DB_FILE):
     embeddings = list(data["embeddings"])
     labels = list(data["labels"])
 
-# Global variable for the video capture frame
+# Global variables for the video capture frame
 frame = None
 frame_lock = threading.Lock()
 
@@ -44,56 +44,73 @@ def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
 # Dang ky khuon mat
-def register_face(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = detector(gray)
+def register_face():
+    global frame
+    while True:
+        with frame_lock:
+            if frame is None:
+                continue  # Skip if the frame is not ready yet
 
-    if len(faces) == 0:
-        return
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector(gray)
 
-    face = faces[0]
-    landmarks = sp(gray, face)
-    embedding = face_encoder.compute_face_descriptor(frame, landmarks)
-    embedding = np.array(embedding)
+        if len(faces) == 0:
+            continue
 
-    for reg_emb in embeddings:
-        _, matched = compare_embeddings(reg_emb, embedding)
-        if matched:
-            return
-
-    name = input("Nhap ten nguoi dung: ").strip()
-    if name in labels:
-        return
-
-    embeddings.append(embedding)
-    labels.append(name)
-    save_db()
-
-# Xac thuc khuon mat va hien thi ket qua tren khung hinh
-def verify_faces_on_frame(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = detector(gray)
-
-    for face in faces:
+        face = faces[0]
         landmarks = sp(gray, face)
         embedding = face_encoder.compute_face_descriptor(frame, landmarks)
         embedding = np.array(embedding)
 
-        matched_name = "Unknown"
-        max_score = 0.0
+        # Check if this face is already registered
+        for reg_emb in embeddings:
+            _, matched = compare_embeddings(reg_emb, embedding)
+            if matched:
+                print("Face already registered.")
+                continue
 
-        for name, reg_emb in zip(labels, embeddings):
-            dist, matched = compare_embeddings(reg_emb, embedding)
-            score = max(0, 1 - dist) * 100
-            if matched and score > max_score:
-                matched_name = name
-                max_score = score
+        # Prompt user for a name and register
+        name = input("Nhap ten nguoi dung: ").strip()
+        if name in labels:
+            print(f"Name '{name}' already exists.")
+            continue
 
-        # Ve bounding box va ten
-        cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
-        text = f"{matched_name} ({max_score:.2f}%)"
-        cv2.putText(frame, text, (face.left(), face.top() - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        embeddings.append(embedding)
+        labels.append(name)
+        save_db()
+        print(f"Face for {name} registered successfully.")
+
+# Xac thuc khuon mat va hien thi ket qua tren khung hinh
+def verify_faces_on_frame():
+    global frame
+    while True:
+        with frame_lock:
+            if frame is None:
+                continue  # Skip if the frame is not ready yet
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = detector(gray)
+
+        for face in faces:
+            landmarks = sp(gray, face)
+            embedding = face_encoder.compute_face_descriptor(frame, landmarks)
+            embedding = np.array(embedding)
+
+            matched_name = "Unknown"
+            max_score = 0.0
+
+            for name, reg_emb in zip(labels, embeddings):
+                dist, matched = compare_embeddings(reg_emb, embedding)
+                score = max(0, 1 - dist) * 100
+                if matched and score > max_score:
+                    matched_name = name
+                    max_score = score
+
+            # Draw bounding box and name on the frame
+            cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
+            text = f"{matched_name} ({max_score:.2f}%)"
+            cv2.putText(frame, text, (face.left(), face.top() - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
 # Video capture thread
 def video_capture_thread():
@@ -107,36 +124,25 @@ def video_capture_thread():
             frame = captured_frame
     cap.release()
 
-# Main thread to process the frame
+# Main function to start threads for face registration and verification
 def main():
-    global frame
-    mode = "idle"
-
     # Start the video capture thread
     capture_thread = threading.Thread(target=video_capture_thread)
     capture_thread.daemon = True
     capture_thread.start()
 
+    # Start the face registration thread
+    register_thread = threading.Thread(target=register_face)
+    register_thread.daemon = True
+    register_thread.start()
+
+    # Start the face verification thread
+    verify_thread = threading.Thread(target=verify_faces_on_frame)
+    verify_thread.daemon = True
+    verify_thread.start()
+
     while True:
-        with frame_lock:
-            if frame is None:
-                continue  # Skip if the frame is not ready yet
-
-        # Xu ly theo mode
-        if mode == "register":
-            register_face(frame)
-            mode = "idle"
-        else:
-            verify_faces_on_frame(frame)
-
-        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.imshow("Face Recognition", frame)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('r'):
-            mode = "register"
-        elif key == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cv2.destroyAllWindows()
