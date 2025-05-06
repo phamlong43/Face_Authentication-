@@ -25,8 +25,8 @@ def compare_embeddings(embedding1, embedding2):
 def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
-def register_face(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+def register_process(face_img):
+    gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
 
     if len(faces) == 0:
@@ -35,7 +35,7 @@ def register_face(image):
 
     face = faces[0]
     landmarks = sp(gray, face)
-    embedding = face_encoder.compute_face_descriptor(image, landmarks)
+    embedding = face_encoder.compute_face_descriptor(face_img, landmarks)
     embedding = np.array(embedding)
 
     for reg_emb in embeddings:
@@ -44,11 +44,10 @@ def register_face(image):
             print("[!] Khuon mat da ton tai.")
             return
 
-    name = input("[?] Nhap ten: ").strip()
+    name = input("[?] Nhap ten de dang ky: ").strip()
     if not name:
         print("[-] Dang ky bi huy.")
         return
-
     if name in labels:
         print(f"[!] Ten '{name}' da ton tai.")
         return
@@ -56,7 +55,36 @@ def register_face(image):
     embeddings.append(embedding)
     labels.append(name)
     save_db()
-    print(f"[+] Dang ky thanh cong: {name}")
+    print(f"[+] Dang ky thanh cong cho {name}")
+
+def register_interactive(cap):
+    while True:
+        print("[*] Dang chup khuon mat...")
+        ret, frame = cap.read()
+        if not ret:
+            print("[!] Loi camera.")
+            return
+
+        # Hien thi anh chup len
+        preview = frame.copy()
+        cv2.putText(preview, "Nhan 'y' de xac nhan | 'c' de chup lai | 'q' de huy", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        cv2.imshow("Xac nhan dang ky", preview)
+
+        # Doi nguoi dung bam phim
+        while True:
+            k = cv2.waitKey(1) & 0xFF
+            if k == ord('y'):
+                cv2.destroyWindow("Xac nhan dang ky")
+                register_process(frame)
+                return
+            elif k == ord('c'):
+                cv2.destroyWindow("Xac nhan dang ky")
+                break  # chup lai
+            elif k == ord('q'):
+                cv2.destroyWindow("Xac nhan dang ky")
+                print("[-] Dang ky bi huy.")
+                return
 
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -84,15 +112,12 @@ def verify_faces_on_frame(frame):
 
 def main():
     cap = cv2.VideoCapture(0)
-    last_frame = None
-    register_thread = None
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        last_frame = frame.copy()
         verify_faces_on_frame(frame)
 
         cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
@@ -100,11 +125,8 @@ def main():
         cv2.imshow("Nhan dien khuon mat", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('r') and (register_thread is None or not register_thread.is_alive()):
-            print("[*] Dang chup khuon mat va cho nhap ten...")
-            # B?t đ?u đăng k? trong thread riêng đ? không d?ng cam
-            register_thread = threading.Thread(target=register_face, args=(last_frame.copy(),))
-            register_thread.start()
+        if key == ord('r'):
+            register_interactive(cap)
         elif key == ord('q'):
             break
 
