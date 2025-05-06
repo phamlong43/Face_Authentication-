@@ -1,76 +1,55 @@
-# -*- coding: utf-8 -*-
 import dlib
 import cv2
 import numpy as np
 import os
+import threading
+import time
 
-# Tải mô hình phát hiện khuôn mặt và trích xuất đặc trưng
+# Load model
 detector = dlib.get_frontal_face_detector()
 sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
 face_encoder = dlib.face_recognition_model_v1("dlib_face_recognition_resnet_model_v1.dat")
 
-# Tên file chứa cơ sở dữ liệu khuôn mặt
 DB_FILE = "face_db.npz"
 embeddings = []
 labels = []
 
-# Load cơ sở dữ liệu nếu có
 if os.path.exists(DB_FILE):
     data = np.load(DB_FILE, allow_pickle=True)
     embeddings = list(data["embeddings"])
     labels = list(data["labels"])
 
-# Hàm trích xuất đặc trưng khuôn mặt
-def get_face_embedding(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    faces = detector(gray)
-    embs = []
-    for face in faces:
-        landmarks = sp(gray, face)
-        embedding = face_encoder.compute_face_descriptor(image, landmarks)
-        embs.append(np.array(embedding))
-    return embs
-
-# So sánh hai embedding
 def compare_embeddings(embedding1, embedding2):
     dist = np.linalg.norm(embedding1 - embedding2)
     return dist, dist < 0.4
 
-# Lưu cơ sở dữ liệu
 def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
-# Đăng ký khuôn mặt
-def register_face(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+def register_face(image, name):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
 
     if len(faces) == 0:
-        print("Khong phat hien khuon mat.")
+        print("? Không phát hi?n khuôn m?t.")
         return
 
     face = faces[0]
     landmarks = sp(gray, face)
-    embedding = face_encoder.compute_face_descriptor(frame, landmarks)
+    embedding = face_encoder.compute_face_descriptor(image, landmarks)
     embedding = np.array(embedding)
 
     for reg_emb in embeddings:
         _, matched = compare_embeddings(reg_emb, embedding)
         if matched:
-            print("Khuon mat da ton tai.")
+            print("? Khuôn m?t đ? t?n t?i.")
             return
-
-    name = input("Nhap ten nguoi dung: ").strip()
-    if name in labels:
-        print("Nguoi dung da ton tai.")
-        return
 
     embeddings.append(embedding)
     labels.append(name)
     save_db()
-    print(f"Dang ky thanh cong cho {name}")
+    print(f"? Đăng k? thành công: {name}")
 
-# Xác thực khuôn mặt và hiển thị kết quả
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -90,60 +69,53 @@ def verify_faces_on_frame(frame):
                 matched_name = name
                 max_score = score
 
-        # Vẽ khung và hiển thị tên
+        # Draw box and name
         cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
         text = f"{matched_name} ({max_score:.2f}%)"
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Chế độ đăng ký
-def run_register_mode():
-    cap = cv2.VideoCapture(0)
-    print("Chế độ DANG KY. Nhấn 'q' để thoát.")
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+# Bi?n toàn c?c đ? theo d?i tr?ng thái đăng k?
+register_requested = False
+register_name = ""
+register_lock = threading.Lock()
 
-        register_face(frame)
-        cv2.imshow("Register Face", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
+# Lu?ng đăng k? không ch?n lu?ng chính
+def register_worker(frame, name):
+    with register_lock:
+        register_face(frame.copy(), name)
 
-    cap.release()
-    cv2.destroyAllWindows()
-
-# Chế độ xác thực
-def run_verification_mode():
-    cap = cv2.VideoCapture(0)
-    print("Chế độ XAC THUC. Nhấn 'q' để thoát.")
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        verify_faces_on_frame(frame)
-        cv2.imshow("Verify Face", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-# Menu chính
 def main():
-    print("1: Dang ky khuon mat")
-    print("2: Xac thuc khuon mat")
-    choice = input("Chon che do (1 hoac 2): ").strip()
+    global register_requested, register_name
+    cap = cv2.VideoCapture(0)
+    print("Nh?n 'r' đ? đăng k?, 'q' đ? thoát.")
 
-    if choice == '1':
-        run_register_mode()
-    elif choice == '2':
-        run_verification_mode()
-    else:
-        print("Lua chon khong hop le!")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Xác th?c liên t?c
+        verify_faces_on_frame(frame)
+
+        # Giao di?n hi?n th?
+        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.imshow("Face Recognition", frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('r') and not register_lock.locked():
+            print("?? Đang ch? nh?p tên ngư?i dùng (trên terminal)...")
+            register_name = input("Nh?p tên ngư?i dùng đ? đăng k?: ").strip()
+            if register_name and register_name not in labels:
+                threading.Thread(target=register_worker, args=(frame.copy(), register_name), daemon=True).start()
+            else:
+                print("? Tên đ? t?n t?i ho?c không h?p l?.")
+        elif key == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
