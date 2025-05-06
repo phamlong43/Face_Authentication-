@@ -1,16 +1,22 @@
-# -*- coding: utf-8 -*-
 import dlib
 import cv2
 import numpy as np
 import os
 import threading
+import queue
 
-# Tai model phat hien khuon mat va dac trung khuon mat
+# Tạo khóa để bảo vệ các thao tác ghi vào cơ sở dữ liệu
+db_lock = threading.Lock()
+
+# Tạo hàng đợi để xử lý các khung hình tuần tự
+frame_queue = queue.Queue()
+
+# Tải model phát hiện khuôn mặt và đặc trưng khuôn mặt
 detector = dlib.get_frontal_face_detector()
 sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
 face_encoder = dlib.face_recognition_model_v1("dlib_face_recognition_resnet_model_v1.dat")
 
-# File luu co so du lieu khuon mat
+# File lưu cơ sở dữ liệu khuôn mặt
 DB_FILE = "face_db.npz"
 embeddings = []
 labels = []
@@ -20,7 +26,7 @@ if os.path.exists(DB_FILE):
     embeddings = list(data["embeddings"])
     labels = list(data["labels"])
 
-# Lay embedding tu anh
+# Lấy embedding từ ảnh
 def get_face_embedding(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -31,16 +37,17 @@ def get_face_embedding(image):
         embs.append(np.array(embedding))
     return embs
 
-# So sanh 2 embedding
+# So sánh hai embedding
 def compare_embeddings(embedding1, embedding2):
     dist = np.linalg.norm(embedding1 - embedding2)
     return dist, dist < 0.4
 
-# Luu csdl
+# Lưu cơ sở dữ liệu
 def save_db():
-    np.savez(DB_FILE, embeddings=embeddings, labels=labels)
+    with db_lock:  # Đảm bảo chỉ có một luồng ghi vào cơ sở dữ liệu
+        np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
-# Dang ky khuon mat
+# Đăng ký khuôn mặt
 def register_face(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -58,15 +65,16 @@ def register_face(frame):
         if matched:
             return
 
-    name = input("Nhap ten nguoi dung: ").strip()
+    name = input("Nhập tên người dùng: ").strip()
     if name in labels:
         return
 
-    embeddings.append(embedding)
-    labels.append(name)
-    save_db()
+    with db_lock:
+        embeddings.append(embedding)
+        labels.append(name)
+        save_db()
 
-# Xac thuc khuon mat va hien thi ket qua tren khung hinh
+# Xác thực khuôn mặt và hiển thị kết quả trên khung hình
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -86,13 +94,13 @@ def verify_faces_on_frame(frame):
                 matched_name = name
                 max_score = score
 
-        # Ve bounding box va ten
+        # Vẽ bounding box và tên
         cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
         text = f"{matched_name} ({max_score:.2f}%)"
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-# Chống giả mạo bằng cách kiểm tra Landmark
+# Kiểm tra giả mạo bằng cách kiểm tra Landmark
 def detect_spoofing_with_landmarks(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -105,13 +113,11 @@ def detect_spoofing_with_landmarks(frame):
 
     # Tính toán khoảng cách giữa các điểm landmark và kiểm tra tính hợp lý
     points = [(p.x, p.y) for p in landmarks.parts()]
-    
-    # Tính khoảng cách giữa các cặp điểm landmark quan trọng
     dist_eye_nose = np.linalg.norm(np.array(points[36]) - np.array(points[30]))  # Khoảng cách giữa mắt trái và mũi
     dist_eye_mouth = np.linalg.norm(np.array(points[36]) - np.array(points[48]))  # Khoảng cách giữa mắt trái và miệng
 
-    # Kiểm tra các giá trị khoảng cách có hợp lý hay không (giới hạn tùy chỉnh)
-    if dist_eye_nose < 15 or dist_eye_mouth < 20:  # Nếu khoảng cách quá nhỏ thì có thể là giả mạo
+    # Kiểm tra khoảng cách có hợp lý không
+    if dist_eye_nose < 15 or dist_eye_mouth < 20:
         return True
 
     # Kiểm tra sự phân bố các điểm landmark
@@ -121,7 +127,6 @@ def detect_spoofing_with_landmarks(frame):
     variance_x = np.var([point[0] for point in points])
     variance_y = np.var([point[1] for point in points])
 
-    # Nếu sự phân bố không tự nhiên (tức là các điểm quá gần nhau), có thể là dấu hiệu của giả mạo
     if variance_x < 100 or variance_y < 100:
         return True
 
@@ -142,14 +147,14 @@ def main():
             cv2.putText(frame, "Warning: Spoofing detected!", (10, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         else:
-            # Xu ly theo mode
+            # Xử lý theo chế độ
             if mode == "register":
-                threading.Thread(target=register_face, args=(frame,)).start()
+                frame_queue.put((register_face, frame))
                 mode = "idle"
             else:
-                threading.Thread(target=verify_faces_on_frame, args=(frame,)).start()
+                frame_queue.put((verify_faces_on_frame, frame))
 
-        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
+        cv2.putText(frame, "'r': Đăng ký | 'q': Thoát", (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.imshow("Face Recognition", frame)
 
@@ -162,5 +167,15 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
 
+# Hàm xử lý công việc từ hàng đợi
+def process_queue():
+    while True:
+        func, frame = frame_queue.get()
+        if func:
+            func(frame)
+        frame_queue.task_done()
+
 if __name__ == "__main__":
+    # Bắt đầu luồng xử lý công việc
+    threading.Thread(target=process_queue, daemon=True).start()
     main()
