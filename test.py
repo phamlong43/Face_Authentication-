@@ -25,7 +25,7 @@ def compare_embeddings(embedding1, embedding2):
 def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
 
-def register_face(image, name):
+def register_face(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
 
@@ -43,6 +43,15 @@ def register_face(image, name):
         if matched:
             print("[!] Khuon mat da ton tai.")
             return
+
+    name = input("[?] Nhap ten: ").strip()
+    if not name:
+        print("[-] Dang ky bi huy.")
+        return
+
+    if name in labels:
+        print(f"[!] Ten '{name}' da ton tai.")
+        return
 
     embeddings.append(embedding)
     labels.append(name)
@@ -76,6 +85,7 @@ def verify_faces_on_frame(frame):
 def main():
     cap = cv2.VideoCapture(0)
     last_frame = None
+    register_thread = None
 
     while True:
         ret, frame = cap.read()
@@ -90,13 +100,11 @@ def main():
         cv2.imshow("Nhan dien khuon mat", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('r'):
-            print("[*] Dang ky: nhap ten tren terminal...")
-            name = input("Nhap ten: ").strip()
-            if name:
-                threading.Thread(target=register_face, args=(last_frame.copy(), name)).start()
-            else:
-                print("[-] Dang ky bi huy.")
+        if key == ord('r') and (register_thread is None or not register_thread.is_alive()):
+            print("[*] Dang chup khuon mat va cho nhap ten...")
+            # B?t đ?u đăng k? trong thread riêng đ? không d?ng cam
+            register_thread = threading.Thread(target=register_face, args=(last_frame.copy(),))
+            register_thread.start()
         elif key == ord('q'):
             break
 
