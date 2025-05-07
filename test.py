@@ -38,24 +38,51 @@ def is_face_centered(face, frame_shape, threshold_ratio=0.2):
     center_diff = np.linalg.norm([face_center_x - frame_center_x, face_center_y - frame_center_y])
     return center_diff < threshold_ratio * min(frame_shape[0], frame_shape[1])
 
-def get_pose_direction(landmarks):
-    nose = landmarks.part(30)
-    chin = landmarks.part(8)
-    left_eye = landmarks.part(36)
-    right_eye = landmarks.part(45)
+def get_pose_direction_solvepnp(landmarks, frame_shape):
+    image_points = np.array([
+        (landmarks.part(30).x, landmarks.part(30).y),  # Nose tip
+        (landmarks.part(8).x, landmarks.part(8).y),    # Chin
+        (landmarks.part(36).x, landmarks.part(36).y),  # Left eye left corner
+        (landmarks.part(45).x, landmarks.part(45).y),  # Right eye right corner
+        (landmarks.part(48).x, landmarks.part(48).y),  # Left Mouth corner
+        (landmarks.part(54).x, landmarks.part(54).y)   # Right mouth corner
+    ], dtype="double")
 
-    dx = right_eye.x - left_eye.x
-    dy = right_eye.y - left_eye.y
-    angle = np.arctan2(dy, dx) * 180 / np.pi
+    model_points = np.array([
+        (0.0, 0.0, 0.0),
+        (0.0, -63.6, -12.5),
+        (-43.3, 32.7, -26.0),
+        (43.3, 32.7, -26.0),
+        (-28.9, -28.9, -24.1),
+        (28.9, -28.9, -24.1)
+    ])
 
-    nose_chin_dy = chin.y - nose.y
-    if nose_chin_dy > 40:
+    focal_length = frame_shape[1]
+    center = (frame_shape[1] / 2, frame_shape[0] / 2)
+    camera_matrix = np.array([
+        [focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]
+    ], dtype="double")
+
+    dist_coeffs = np.zeros((4, 1))
+    success, rotation_vector, _ = cv2.solvePnP(model_points, image_points, camera_matrix, dist_coeffs)
+
+    if not success:
+        return "unknown"
+
+    rotation_mat, _ = cv2.Rodrigues(rotation_vector)
+    pose_mat = cv2.hconcat((rotation_mat, np.zeros((3, 1))))
+    _, _, _, _, _, _, eulerAngles = cv2.decomposeProjectionMatrix(pose_mat)
+    pitch, yaw, roll = eulerAngles.flatten()
+
+    if pitch < -15:
         return "looking down"
-    elif nose_chin_dy < 10:
+    elif pitch > 15:
         return "looking up"
-    elif angle > 15:
+    elif yaw < -15:
         return "looking left"
-    elif angle < -15:
+    elif yaw > 15:
         return "looking right"
     else:
         return "frontal"
@@ -96,7 +123,7 @@ def register_multi_pose(cap):
                 face = faces[0]
                 if is_face_centered(face, frame.shape):
                     landmarks = sp(gray, face)
-                    detected_pose = get_pose_direction(landmarks)
+                    detected_pose = get_pose_direction_solvepnp(landmarks, frame.shape)
 
                     cv2.rectangle(display_frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
                     cv2.putText(display_frame, f"{message} - Nhan 'c' de chup", (10, 30),
