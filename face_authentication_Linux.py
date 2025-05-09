@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import os
 from itertools import combinations
+import random
 
 # Load model
 detector = dlib.get_frontal_face_detector()
@@ -187,7 +188,8 @@ def register_multi_pose(cap):
 
     cv2.destroyWindow("Dang ky")
 
-def verify_faces_on_frame(frame):
+
+def verify_faces_on_frame(frame, require_pose_check=False, target_pose=None):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
 
@@ -198,6 +200,7 @@ def verify_faces_on_frame(frame):
 
         matched_name = "Unknown"
         max_score = 0.0
+        pose_check_message = ""
 
         for name, reg_emb in zip(labels, embeddings):
             dist, matched = compare_embeddings(reg_emb, embedding)
@@ -211,29 +214,60 @@ def verify_faces_on_frame(frame):
         cv2.putText(frame, text, (face.left(), face.top() - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
+        if require_pose_check:
+            detected_pose = get_pose_direction(landmarks)
+            if detected_pose == target_pose:
+                pose_check_message = "Xac thuc thanh cong!"
+                print(f"[+] Xac thuc thanh cong: {matched_name}")
+                return True  # Exit verification mode
+            else:
+                pose_check_message = f"Can thuc hien {target_pose}, hien tai: {detected_pose}"
+
+            cv2.putText(frame, pose_check_message, (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+
+    return False  # No successful verification
+
 def main():
-    suggest_optimal_threshold()
     cap = cv2.VideoCapture(0)
+    require_pose_check = False
+    target_pose = None
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        verify_faces_on_frame(frame)
+        if require_pose_check:
+            success = verify_faces_on_frame(frame, require_pose_check=True, target_pose=target_pose)
+            if success:
+                require_pose_check = False  
+        else:
+            verify_faces_on_frame(frame)
 
-        cv2.putText(frame, "'r': Dang ky | 'q': Thoat", (10, 20),
+        cv2.putText(frame, "'v': Xac thuc | 'r': Dang ky | 'q': Thoat", (10, 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.imshow("Nhan dien khuon mat", frame)
 
         key = cv2.waitKey(1) & 0xFF
+
+        if key == ord('v'):
+            require_pose_check = True
+            target_pose = random.choice(["looking left", "looking right", "looking up", "looking down"])
+            print(f"[+] Yeu cau nghieng mat: {target_pose}")
+
         if key == ord('r'):
             register_multi_pose(cap)
-        elif key == ord('q'):
+
+        if key == ord('q'):
             break
+
+        cv2.imshow("Nhan dien khuon mat", frame)
 
     cap.release()
     cv2.destroyAllWindows()
+
+
+
 
 if __name__ == "__main__":
     main()
