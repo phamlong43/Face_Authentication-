@@ -12,7 +12,7 @@ face_encoder = dlib.face_recognition_model_v1("dlib_face_recognition_resnet_mode
 DB_FILE = "face_db.npz"
 embeddings = []
 labels = []
-THRESHOLD = 0.4  # Sẽ được tự động cập nhật
+THRESHOLD = 0.5
 
 if os.path.exists(DB_FILE):
     data = np.load(DB_FILE, allow_pickle=True)
@@ -22,7 +22,6 @@ if os.path.exists(DB_FILE):
 def suggest_optimal_threshold():
     global THRESHOLD
     if len(embeddings) < 2:
-        print("[!] Không đủ khuôn mặt trong DB để tính threshold.")
         return
 
     same_dists = []
@@ -36,14 +35,15 @@ def suggest_optimal_threshold():
             diff_dists.append(dist)
 
     if not diff_dists:
-        print("[!] DB chưa có đủ người khác nhau để đề xuất threshold.")
         return
 
-    thresholds = np.linspace(0.2, 1.0, 200)
-    best_threshold = 0.4
+    thresholds = np.linspace(0.2, 5.0, 250)
+    best_threshold = 0.5
     best_acc = 0
 
     for t in thresholds:
+        if t >= 0.5:
+            continue
         tp = np.sum(np.array(same_dists) <= t)
         fn = np.sum(np.array(same_dists) > t)
         tn = np.sum(np.array(diff_dists) > t)
@@ -54,8 +54,6 @@ def suggest_optimal_threshold():
             best_threshold = t
 
     THRESHOLD = best_threshold
-    print(f"[+] Threshold tối ưu được cập nhật: {THRESHOLD:.4f} (Độ chính xác: {best_acc*100:.2f}%)")
-
 def compare_embeddings(embedding1, embedding2):
     dist = np.linalg.norm(embedding1 - embedding2)
     return dist, dist < THRESHOLD
