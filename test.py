@@ -2,6 +2,7 @@ import dlib
 import cv2
 import numpy as np
 import os
+from itertools import combinations
 
 # Load model
 detector = dlib.get_frontal_face_detector()
@@ -11,15 +12,53 @@ face_encoder = dlib.face_recognition_model_v1("dlib_face_recognition_resnet_mode
 DB_FILE = "face_db.npz"
 embeddings = []
 labels = []
+THRESHOLD = 0.4  # Sẽ được tự động cập nhật
 
 if os.path.exists(DB_FILE):
     data = np.load(DB_FILE, allow_pickle=True)
     embeddings = list(data["embeddings"])
     labels = list(data["labels"])
 
+def suggest_optimal_threshold():
+    global THRESHOLD
+    if len(embeddings) < 2:
+        print("[!] Không đủ khuôn mặt trong DB để tính threshold.")
+        return
+
+    same_dists = []
+    diff_dists = []
+
+    for (i1, emb1), (i2, emb2) in combinations(enumerate(embeddings), 2):
+        dist = np.linalg.norm(emb1 - emb2)
+        if labels[i1] == labels[i2]:
+            same_dists.append(dist)
+        else:
+            diff_dists.append(dist)
+
+    if not diff_dists:
+        print("[!] DB chưa có đủ người khác nhau để đề xuất threshold.")
+        return
+
+    thresholds = np.linspace(0.2, 1.0, 200)
+    best_threshold = 0.4
+    best_acc = 0
+
+    for t in thresholds:
+        tp = np.sum(np.array(same_dists) <= t)
+        fn = np.sum(np.array(same_dists) > t)
+        tn = np.sum(np.array(diff_dists) > t)
+        fp = np.sum(np.array(diff_dists) <= t)
+        acc = (tp + tn) / (tp + tn + fp + fn)
+        if acc > best_acc:
+            best_acc = acc
+            best_threshold = t
+
+    THRESHOLD = best_threshold
+    print(f"[+] Threshold tối ưu được cập nhật: {THRESHOLD:.4f} (Độ chính xác: {best_acc*100:.2f}%)")
+
 def compare_embeddings(embedding1, embedding2):
     dist = np.linalg.norm(embedding1 - embedding2)
-    return dist, dist < 0.4
+    return dist, dist < THRESHOLD
 
 def save_db():
     np.savez(DB_FILE, embeddings=embeddings, labels=labels)
@@ -62,7 +101,6 @@ def get_pose_direction(landmarks):
     elif horizontal_ratio < 0.4:
         return "looking right"
     return "frontal"
-
 
 def register_multi_pose(cap):
     required_poses = {
@@ -121,7 +159,7 @@ def register_multi_pose(cap):
                         if pose == "frontal":
                             for saved_emb in embeddings:
                                 dist = np.linalg.norm(emb - saved_emb)
-                                if dist < 0.4:
+                                if dist < THRESHOLD:
                                     print("[!] Khuon mat da ton tai trong he thong.")
                                     cv2.destroyWindow("Dang ky")
                                     return
@@ -151,7 +189,6 @@ def register_multi_pose(cap):
 
     cv2.destroyWindow("Dang ky")
 
-
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = detector(gray)
@@ -177,6 +214,7 @@ def verify_faces_on_frame(frame):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
 def main():
+    suggest_optimal_threshold()
     cap = cv2.VideoCapture(0)
 
     while True:
