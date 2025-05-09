@@ -38,54 +38,31 @@ def is_face_centered(face, frame_shape, threshold_ratio=0.2):
     center_diff = np.linalg.norm([face_center_x - frame_center_x, face_center_y - frame_center_y])
     return center_diff < threshold_ratio * min(frame_shape[0], frame_shape[1])
 
-def get_pose_direction_solvepnp(landmarks, frame_shape):
-    image_points = np.array([
-        (landmarks.part(30).x, landmarks.part(30).y),  # Nose tip
-        (landmarks.part(8).x, landmarks.part(8).y),    # Chin
-        (landmarks.part(36).x, landmarks.part(36).y),  # Left eye left corner
-        (landmarks.part(45).x, landmarks.part(45).y),  # Right eye right corner
-        (landmarks.part(48).x, landmarks.part(48).y),  # Left Mouth corner
-        (landmarks.part(54).x, landmarks.part(54).y)   # Right mouth corner
-    ], dtype="double")
+def get_pose_direction(landmarks):
+    nose = landmarks.part(30)
+    chin = landmarks.part(8)
+    forehead = landmarks.part(27)
+    left_cheek = landmarks.part(2)  
+    right_cheek = landmarks.part(14) 
 
-    model_points = np.array([
-        (0.0, 0.0, 0.0),
-        (0.0, -63.6, -12.5),
-        (-43.3, 32.7, -26.0),
-        (43.3, 32.7, -26.0),
-        (-28.9, -28.9, -24.1),
-        (28.9, -28.9, -24.1)
-    ])
+    face_height = chin.y - forehead.y
+    nose_chin_dist = chin.y - nose.y
+    vertical_ratio = nose_chin_dist / face_height if face_height > 0 else 0
 
-    focal_length = frame_shape[1]
-    center = (frame_shape[1] / 2, frame_shape[0] / 2)
-    camera_matrix = np.array([
-        [focal_length, 0, center[0]],
-        [0, focal_length, center[1]],
-        [0, 0, 1]
-    ], dtype="double")
+    face_width = right_cheek.x - left_cheek.x
+    nose_left_dist = nose.x - left_cheek.x
+    horizontal_ratio = nose_left_dist / face_width if face_width > 0 else 0
 
-    dist_coeffs = np.zeros((4, 1))
-    success, rotation_vector, _ = cv2.solvePnP(model_points, image_points, camera_matrix, dist_coeffs)
-
-    if not success:
-        return "unknown"
-
-    rotation_mat, _ = cv2.Rodrigues(rotation_vector)
-    pose_mat = cv2.hconcat((rotation_mat, np.zeros((3, 1))))
-    _, _, _, _, _, _, eulerAngles = cv2.decomposeProjectionMatrix(pose_mat)
-    pitch, yaw, roll = eulerAngles.flatten()
-
-    if pitch < -15:
+    if vertical_ratio < 0.65:
         return "looking down"
-    elif pitch > 15:
+    elif vertical_ratio > 0.8:
         return "looking up"
-    elif yaw < -15:
+    if horizontal_ratio > 0.6:
         return "looking left"
-    elif yaw > 15:
+    elif horizontal_ratio < 0.4:
         return "looking right"
-    else:
-        return "frontal"
+    return "frontal"
+
 
 def register_multi_pose(cap):
     required_poses = {
@@ -123,7 +100,7 @@ def register_multi_pose(cap):
                 face = faces[0]
                 if is_face_centered(face, frame.shape):
                     landmarks = sp(gray, face)
-                    detected_pose = get_pose_direction_solvepnp(landmarks, frame.shape)
+                    detected_pose = get_pose_direction(landmarks)
 
                     cv2.rectangle(display_frame, (face.left(), face.top()), (face.right(), face.bottom()), (0, 255, 0), 2)
                     cv2.putText(display_frame, f"{message} - Nhan 'c' de chup", (10, 30),
@@ -140,6 +117,15 @@ def register_multi_pose(cap):
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('c') and detected_pose == pose:
                         emb = compute_embedding(frame, face)
+
+                        if pose == "frontal":
+                            for saved_emb in embeddings:
+                                dist = np.linalg.norm(emb - saved_emb)
+                                if dist < 0.4:
+                                    print("[!] Khuon mat da ton tai trong he thong.")
+                                    cv2.destroyWindow("Dang ky")
+                                    return
+
                         captured_embeddings.append(emb)
                         print(f"[+] Da chup goc {pose}")
                         pose_captured = True
@@ -164,6 +150,7 @@ def register_multi_pose(cap):
         print("[!] Dang ky chua hoan tat.")
 
     cv2.destroyWindow("Dang ky")
+
 
 def verify_faces_on_frame(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
